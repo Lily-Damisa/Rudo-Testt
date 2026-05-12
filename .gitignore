@@ -1,0 +1,4 @@
+.env
+rudo~/
+__pycache__/
+*.pyc

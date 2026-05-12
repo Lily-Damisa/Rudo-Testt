@@ -17,29 +17,23 @@ from google.api_core.exceptions import ResourceExhausted
 from training import products, instructions, pregnancy_data, pregnancy_data_shona, pregnancy_data_ndebele, pregnancy_data_tonga, pregnancy_data_chinyanja, pregnancy_data_bemba, pregnancy_data_lozi, cervical_cancer_data, cervical_cancer_data_chinyanja, cervical_cancer_data_lozi
 
 from products_data import products_by_category
-from upstash_redis import Redis
 import json
+from supabase_db import (
+    save_user_state as db_save_user_state,
+    load_user_state as db_load_user_state,
+    save_message as db_save_message,
+    save_order as db_save_order,
+    get_all_orders,
+    get_all_users,
+    get_all_conversations,
+)
 import re
 import random
 import string
 
 logging.basicConfig(level=logging.INFO)
 
-# Initialize Upstash Redis connection
-redis_url = os.environ.get("UPSTASH_REDIS_URL")
-redis_token = os.environ.get("UPSTASH_REDIS_TOKEN")
-
-if redis_url and redis_token:
-    try:
-        redis_client = Redis(url=redis_url, token=redis_token)
-        redis_client.ping()
-        logging.info("Successfully connected to Upstash Redis")
-    except Exception as e:
-        logging.error(f"Failed to connect to Upstash Redis: {e}")
-        redis_client = None
-else:
-    redis_client = None
-    logging.warning("UPSTASH_REDIS_URL or UPSTASH_REDIS_TOKEN not set, Redis functionality disabled")
+# Redis removed — using Supabase via supabase_db.py
 
 # Global in-memory cache (per worker)
 user_states = {}
@@ -89,27 +83,16 @@ safety_settings = [
 # ─────────────────────────────────────────────
 
 def save_single_user_state(sender):
-    """Save only one user's state to Redis under their own key."""
-    if redis_client and sender in user_states:
-        try:
-            redis_client.set(f"user_state:{sender}", json.dumps(user_states[sender]))
-            logging.debug(f"Saved state for {sender}")
-        except Exception as e:
-            logging.error(f"Error saving state for {sender}: {e}")
+    """Save only one user's state to Supabase."""
+    if sender in user_states:
+        db_save_user_state(sender, user_states[sender])
 
 def load_user_state(sender):
-    """Load a single user's state from Redis. Returns dict or None."""
-    if redis_client:
-        try:
-            state_data = redis_client.get(f"user_state:{sender}")
-            if state_data:
-                return json.loads(state_data)
-        except Exception as e:
-            logging.error(f"Error loading user state for {sender}: {e}")
-    return None
+    """Load a single user's state from Supabase. Returns dict or None."""
+    return db_load_user_state(sender)
 
 def save_user_states():
-    """Save all in-memory user states to Redis (one key per user)."""
+    """Save all in-memory user states to Supabase."""
     for sender in list(user_states.keys()):
         save_single_user_state(sender)
 
@@ -167,42 +150,13 @@ def reset_conversation(sender):
 
 
 def get_user_conversation(sender):
-    """Get user conversation history from Upstash Redis"""
-    if redis_client:
-        try:
-            history = redis_client.get(f"conversation:{sender}")
-            if not history:
-                return []
-            if isinstance(history, list):
-                return history
-            if isinstance(history, str):
-                parsed = json.loads(history)
-                if isinstance(parsed, list):
-                    return parsed
-            return []
-        except Exception as e:
-            logging.error(f"Error getting conversation: {e}")
-            return []
-    return []
+    """Get user conversation history from Supabase."""
+    from supabase_db import get_conversation
+    return get_conversation(sender)
 
 def save_user_conversation(sender, role, message):
-    """Save user conversation to Upstash Redis"""
-    if redis_client:
-        try:
-            conversation = get_user_conversation(sender)
-            if not isinstance(conversation, list):
-                conversation = []
-            conversation.append({
-                "role": role,
-                "message": str(message),
-                "timestamp": datetime.now().isoformat()
-            })
-            if len(conversation) > 100:
-                conversation = conversation[-100:]
-            redis_client.set(f"conversation:{sender}", json.dumps(conversation), ex=60*60*24*30)
-            logging.debug(f"Saved conversation for {sender}")
-        except Exception as e:
-            logging.error(f"Error saving conversation: {e}")
+    """Save a message to Supabase conversations table."""
+    db_save_message(sender, role, message)
 
 def detect_language(message, sender=None):
     message_lower = message.lower().strip()
@@ -1522,27 +1476,17 @@ def handle_shop_quantity(sender, prompt, phone_id):
 
 
 def _save_orders_to_redis(sender, cart, address):
-    """Persist all cart items as individual order records in Redis."""
-    if not redis_client:
-        return
+    """Persist all cart items as individual order records in Supabase."""
     user_id = user_states[sender].get("user_id", sender)
     for item in cart:
-        order = {
-            "user_id": user_id,
-            "sender": sender,
-            "product": item["product"],
-            "price": item["price"],
-            "quantity": item["quantity"],
-            "address": address,
-            "timestamp": datetime.now().isoformat(),
-            "status": "pending",
-        }
-        try:
-            order_key = f"orders:{sender}:{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-            redis_client.set(order_key, json.dumps(order))
-            logging.info(f"Order saved: {order_key} -> {order}")
-        except Exception as e:
-            logging.error(f"Error saving order: {e}")
+        db_save_order(
+            sender=sender,
+            user_id=user_id,
+            product=item["product"],
+            price=item["price"],
+            quantity=item["quantity"],
+            address=address
+        )
 
 
 def _send_order_confirmation(sender, phone_id, lang, cart, address):
@@ -2632,3 +2576,44 @@ def webhook():
 if __name__ == "__main__":
     load_user_states()
     app.run(host="0.0.0.0", port=5000, debug=True)
+
+
+# ── Dashboard API routes ──────────────────────────────────────────────────────
+
+@app.route("/dashboard")
+def dashboard():
+    return render_template("dashboard.html")
+
+@app.route("/api/dashboard")
+def api_dashboard():
+    """Returns live stats from Supabase for the dashboard."""
+    from supabase_db import get_all_orders, get_all_users, get_all_conversations
+    users         = get_all_users()
+    orders        = get_all_orders()
+    conversations = get_all_conversations()
+
+    # Parse user states for display
+    parsed_users = []
+    for u in users:
+        try:
+            state = json.loads(u["state"]) if isinstance(u["state"], str) else u["state"]
+        except Exception:
+            state = {}
+        parsed_users.append({
+            "sender":     u["sender"],
+            "language":   state.get("language", "unknown"),
+            "step":       state.get("step", "unknown"),
+            "user_id":    state.get("user_id", "—"),
+            "registered": state.get("registered", False),
+            "updated_at": u.get("updated_at", ""),
+        })
+
+    return jsonify({
+        "total_users":         len(users),
+        "total_orders":        len(orders),
+        "total_messages":      len(conversations),
+        "pending_orders":      sum(1 for o in orders if o.get("status") == "pending"),
+        "users":               parsed_users,
+        "orders":              orders,
+        "recent_conversations": conversations[:50],
+    })

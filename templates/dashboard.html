@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rudo — Dashboard</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #0f0f1a;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        header {
+            background: #181828;
+            padding: 20px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #2a2a40;
+        }
+
+        header h1 { font-size: 22px; color: #04d9ff; }
+        header span { font-size: 13px; color: #888; }
+
+        .main { padding: 28px 32px; }
+
+        /* Stats cards */
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+
+        .card {
+            background: #181828;
+            border: 1px solid #2a2a40;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .card .num {
+            font-size: 36px;
+            font-weight: 700;
+            color: #04d9ff;
+        }
+
+        .card .label {
+            font-size: 13px;
+            color: #888;
+            margin-top: 4px;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #2a2a40;
+            padding-bottom: 0;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 14px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab.active {
+            color: #04d9ff;
+            border-bottom-color: #04d9ff;
+        }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* Tables */
+        .table-wrap {
+            overflow-x: auto;
+            border-radius: 10px;
+            border: 1px solid #2a2a40;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        thead tr { background: #1e1e30; }
+
+        th {
+            padding: 12px 16px;
+            text-align: left;
+            color: #04d9ff;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 11px 16px;
+            border-top: 1px solid #2a2a40;
+            color: #ccc;
+        }
+
+        tr:hover td { background: #1a1a2e; }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .badge-pending  { background: #3a2a00; color: #f5a623; }
+        .badge-done     { background: #0a2a1a; color: #2ecc71; }
+        .badge-true     { background: #0a2a1a; color: #2ecc71; }
+        .badge-false    { background: #2a1010; color: #e74c3c; }
+        .badge-user     { background: #1a1a3a; color: #04d9ff; }
+        .badge-bot      { background: #1a2a1a; color: #2ecc71; }
+
+        .refresh-btn {
+            background: #04d9ff;
+            color: #000;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .refresh-btn:hover { background: #00b8d9; }
+
+        .empty { text-align: center; padding: 40px; color: #555; }
+
+        .loader {
+            text-align: center;
+            padding: 40px;
+            color: #04d9ff;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>🤖 Rudo Dashboard</h1>
+    <div style="display:flex;align-items:center;gap:16px">
+        <span id="lastUpdated">Loading…</span>
+        <button class="refresh-btn" onclick="loadData()">↻ Refresh</button>
+    </div>
+</header>
+
+<div class="main">
+
+    <!-- Stats -->
+    <div class="stats">
+        <div class="card">
+            <div class="num" id="statUsers">—</div>
+            <div class="label">Total Users</div>
+        </div>
+        <div class="card">
+            <div class="num" id="statMessages">—</div>
+            <div class="label">Total Messages</div>
+        </div>
+        <div class="card">
+            <div class="num" id="statOrders">—</div>
+            <div class="label">Total Orders</div>
+        </div>
+        <div class="card">
+            <div class="num" id="statPending">—</div>
+            <div class="label">Pending Orders</div>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab('users', this)">👥 Users</button>
+        <button class="tab" onclick="switchTab('orders', this)">🛒 Orders</button>
+        <button class="tab" onclick="switchTab('conversations', this)">💬 Conversations</button>
+    </div>
+
+    <!-- Users Tab -->
+    <div id="tab-users" class="tab-content active">
+        <div id="usersContent" class="loader">Loading users…</div>
+    </div>
+
+    <!-- Orders Tab -->
+    <div id="tab-orders" class="tab-content">
+        <div id="ordersContent" class="loader">Loading orders…</div>
+    </div>
+
+    <!-- Conversations Tab -->
+    <div id="tab-conversations" class="tab-content">
+        <div id="conversationsContent" class="loader">Loading conversations…</div>
+    </div>
+
+</div>
+
+<script>
+    let data = null;
+
+    async function loadData() {
+        document.getElementById('lastUpdated').textContent = 'Refreshing…';
+        try {
+            const res  = await fetch('/api/dashboard');
+            data = await res.json();
+
+            // Stats
+            document.getElementById('statUsers').textContent    = data.total_users;
+            document.getElementById('statMessages').textContent = data.total_messages;
+            document.getElementById('statOrders').textContent   = data.total_orders;
+            document.getElementById('statPending').textContent  = data.pending_orders;
+
+            renderUsers(data.users);
+            renderOrders(data.orders);
+            renderConversations(data.recent_conversations);
+
+            document.getElementById('lastUpdated').textContent =
+                'Last updated: ' + new Date().toLocaleTimeString();
+        } catch (err) {
+            document.getElementById('lastUpdated').textContent = 'Error loading data';
+            console.error(err);
+        }
+    }
+
+    function renderUsers(users) {
+        const el = document.getElementById('usersContent');
+        if (!users || users.length === 0) {
+            el.innerHTML = '<div class="empty">No users yet.</div>';
+            return;
+        }
+        el.innerHTML = `
+        <div class="table-wrap">
+        <table>
+            <thead><tr>
+                <th>Phone</th>
+                <th>User ID</th>
+                <th>Language</th>
+                <th>Step</th>
+                <th>Registered</th>
+                <th>Last Active</th>
+            </tr></thead>
+            <tbody>
+            ${users.map(u => `
+                <tr>
+                    <td>${u.sender}</td>
+                    <td>${u.user_id}</td>
+                    <td>${u.language}</td>
+                    <td>${u.step}</td>
+                    <td><span class="badge badge-${u.registered}">${u.registered ? 'Yes' : 'No'}</span></td>
+                    <td>${u.updated_at ? new Date(u.updated_at).toLocaleString() : '—'}</td>
+                </tr>`).join('')}
+            </tbody>
+        </table>
+        </div>`;
+    }
+
+    function renderOrders(orders) {
+        const el = document.getElementById('ordersContent');
+        if (!orders || orders.length === 0) {
+            el.innerHTML = '<div class="empty">No orders yet.</div>';
+            return;
+        }
+        el.innerHTML = `
+        <div class="table-wrap">
+        <table>
+            <thead><tr>
+                <th>Phone</th>
+                <th>User ID</th>
+                <th>Product</th>
+                <th>Price</th>
+                <th>Qty</th>
+                <th>Address</th>
+                <th>Status</th>
+                <th>Date</th>
+            </tr></thead>
+            <tbody>
+            ${orders.map(o => `
+                <tr>
+                    <td>${o.sender}</td>
+                    <td>${o.user_id}</td>
+                    <td>${o.product}</td>
+                    <td>${o.price}</td>
+                    <td>${o.quantity}</td>
+                    <td>${o.address}</td>
+                    <td><span class="badge badge-${o.status === 'pending' ? 'pending' : 'done'}">${o.status}</span></td>
+                    <td>${o.created_at ? new Date(o.created_at).toLocaleString() : '—'}</td>
+                </tr>`).join('')}
+            </tbody>
+        </table>
+        </div>`;
+    }
+
+    function renderConversations(convos) {
+        const el = document.getElementById('conversationsContent');
+        if (!convos || convos.length === 0) {
+            el.innerHTML = '<div class="empty">No conversations yet.</div>';
+            return;
+        }
+        el.innerHTML = `
+        <div class="table-wrap">
+        <table>
+            <thead><tr>
+                <th>Phone</th>
+                <th>Role</th>
+                <th>Message</th>
+                <th>Time</th>
+            </tr></thead>
+            <tbody>
+            ${convos.map(c => `
+                <tr>
+                    <td>${c.sender}</td>
+                    <td><span class="badge badge-${c.role}">${c.role}</span></td>
+                    <td>${c.message}</td>
+                    <td>${c.created_at ? new Date(c.created_at).toLocaleString() : '—'}</td>
+                </tr>`).join('')}
+            </tbody>
+        </table>
+        </div>`;
+    }
+
+    function switchTab(name, btn) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('tab-' + name).classList.add('active');
+    }
+
+    // Load on page open, then auto-refresh every 60 seconds
+    loadData();
+    setInterval(loadData, 60000);
+</script>
+</body>
+</html>
